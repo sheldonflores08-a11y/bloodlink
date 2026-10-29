@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blood Map — BloodLink</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <div class="main-area" style="margin-left:0">
+    <header class="topbar">
+      <h1>&#128205; Blood Availability Map</h1>
+      <select id="map-filter" style="width:180px"><option value="">Filter by blood type</option></select>
+      <span id="nav-links">
+        <a href="/" class="btn ghost slim">Home</a>
+        <a href="/login" class="btn ghost slim">Login</a>
+        <a href="/register" class="btn slim">Register</a>
+      </span>
+    </header>
+    <main class="content">
+      <div class="toolbar">
+        <span class="muted small">Click a marker to see available blood, contact number, and details.</span>
+      </div>
+      <div id="map" class="map-box" style="height:600px"></div>
+      <div id="list" class="grid cols-3" style="margin-top:16px"></div>
+    </main>
+  </div>
+</div>
+<div id="toasts"></div>
+<script src="/js/api.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/map.js"></script>
+<script>
+let allLocations = [];
+
+function applyFilter() {
+  const t = document.getElementById('map-filter').value;
+  const list = document.getElementById('list');
+  let locs = allLocations;
+  if (t) locs = locs.filter(l => (l.blood[t] || 0) > 0);
+  BloodMap.render(locs, t || null);
+  list.innerHTML = locs.map(l => {
+    const chips = Object.entries(l.blood).map(([bt, u]) =>
+      `<span class="chip">${UI.esc(bt)} — ${u}</span>`).join('') ||
+      '<span class="muted small">No available blood.</span>';
+    return `<div class="card"><h3>${UI.esc(l.location_name)}</h3>
+      <div class="small muted">${UI.esc(l.address)} &middot; ${UI.esc(l.contact_number)}</div>
+      <div class="blood-line">${chips}</div></div>`;
+  }).join('');
+}
+
+document.getElementById('map-filter').addEventListener('change', applyFilter);
+
+(async () => {
+  // If the visitor is logged in, show app navigation instead.
+  API.get('/api/auth/me').then(() => {
+    document.getElementById('nav-links').innerHTML =
+      '<a href="/dashboard" class="btn slim">Back to Dashboard</a>';
+  }).catch(() => {});
+  const sel = document.getElementById('map-filter');
+  for (const t of ['A+','A-','B+','B-','AB+','AB-','O+','O-']) {
+    const o = document.createElement('option'); o.value = t; o.textContent = t; sel.appendChild(o);
+  }
+  const data = await API.get('/api/blood/map');
+  allLocations = data.locations;
+  await BloodMap.create('map');
+  applyFilter();
+})();
+</script>
+</body>
+</html>

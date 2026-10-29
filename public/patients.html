@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Patients — BloodLink</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/shell.js"></script>
+<script>
+(async () => {
+  const ok = await Shell.init({ title: 'Patient Management', active: 'patients' });
+  if (!ok) return;
+  if (!['staff', 'admin', 'superadmin'].includes(Shell.role)) {
+    Shell.page().innerHTML = '<div class="empty"><b>Access denied.</b></div>'; return;
+  }
+  const page = Shell.page();
+  page.innerHTML = `
+    <div class="card">
+      <div class="toolbar">
+        <input id="search-box" placeholder="Search name, ID, blood type..." style="max-width:300px">
+        <button class="btn slim ghost" id="refresh-btn">Refresh</button>
+        <span class="spacer"></span>
+        <button class="btn" id="add-btn">+ Add Patient</button>
+      </div>
+      <div id="patient-table"></div>
+    </div>`;
+
+  function patientFormValues(p) {
+    UI.fillBloodSelects(false);
+    return `
+      <div class="form-grid">
+        <div class="field"><label>First Name *</label><input name="first_name" required value="${UI.esc(p.first_name || '')}"></div>
+        <div class="field"><label>Middle Name</label><input name="middle_name" value="${UI.esc(p.middle_name || '')}"></div>
+        <div class="field"><label>Last Name *</label><input name="last_name" required value="${UI.esc(p.last_name || '')}"></div>
+        <div class="field"><label>Age *</label><input name="age" type="number" min="1" max="119" required value="${p.age || ''}"></div>
+        <div class="field"><label>Sex *</label>
+          <select name="sex" required><option value="">Select...</option>
+          <option ${p.sex === 'Male' ? 'selected' : ''}>Male</option>
+          <option ${p.sex === 'Female' ? 'selected' : ''}>Female</option></select></div>
+        <div class="field"><label>Blood Type Needed *</label><select name="blood_type_needed" data-blood-types required></select></div>
+        <div class="field"><label>Contact Number *</label><input name="contact_number" required value="${UI.esc(p.contact_number || '')}"></div>
+        <div class="field"><label>Hospital *</label><input name="hospital" required value="${UI.esc(p.hospital || '')}"></div>
+        <div class="field full"><label>Address *</label><input name="address" required value="${UI.esc(p.address || '')}"></div>
+        <div class="field full"><label>Medical Notes</label><textarea name="medical_notes">${UI.esc(p.medical_notes || '')}</textarea></div>
+      </div>`;
+  }
+
+  async function load() {
+    const q = document.getElementById('search-box').value;
+    const data = await API.get('/api/staff/patients' + (q ? `?search=${encodeURIComponent(q)}` : ''));
+    document.getElementById('patient-table').innerHTML = UI.table(
+      ['Patient ID', 'Name', 'Age/Sex', 'Needed', 'Hospital', 'Requests', 'Status', 'Actions'],
+      data.patients.map(p => `<tr>
+        <td>${UI.esc(p.patient_code)}</td>
+        <td>${UI.esc(p.first_name)} ${UI.esc(p.middle_name || '')} ${UI.esc(p.last_name)}</td>
+        <td>${p.age} / ${UI.esc(p.sex)}</td>
+        <td>${UI.bloodChip(p.blood_type_needed)}</td>
+        <td class="muted small">${UI.esc(p.hospital)}</td>
+        <td>${p.request_count}</td>
+        <td>${UI.statusBadge(p.status)}</td>
+        <td>
+          <button class="btn slim ghost" onclick='editPatient(${JSON.stringify(p).replace(/'/g, "&#39;")})'>Edit</button>
+          <button class="btn slim ${p.status === 'active' ? 'danger-outline' : 'blue'}" onclick="toggleStatus(${p.id},'${p.status}')">${p.status === 'active' ? 'Deactivate' : 'Activate'}</button>
+        </td></tr>`).join(''));
+  }
+
+  window.editPatient = (p) => {
+    UI.modal(`Edit Patient — ${p.patient_code}`,
+      `<form id="pat-edit">${patientFormValues(p)}</form>`,
+      `<button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
+       <button class="btn" onclick="savePatient(${p.id})">Save Changes</button>`);
+    document.querySelector('#pat-edit select[name=blood_type_needed]').value = p.blood_type_needed;
+  };
+
+  document.getElementById('add-btn').onclick = () => {
+    UI.modal('Add Patient',
+      `<form id="pat-edit">${patientFormValues({})}</form>
+       <p class="muted small" style="margin-top:8px">A login account is created automatically (ID-based username/password).</p>`,
+      `<button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
+       <button class="btn" onclick="savePatient(null)">Add Patient</button>`);
+  };
+
+  window.savePatient = async (id) => {
+    const form = document.getElementById('pat-edit');
+    const values = UI.formValues(form);
+    if (!form.reportValidity()) return;
+    try {
+      const d = id
+        ? await API.put(`/api/staff/patients/${id}`, values)
+        : await API.post('/api/staff/patients', values);
+      UI.closeModal(); UI.okToast(d.message); load();
+    } catch (e) { UI.errToast(e.message); }
+  };
+
+  window.toggleStatus = async (id, current) => {
+    const verb = current === 'active' ? 'Deactivate' : 'Activate';
+    if (!(await UI.confirm(verb + ' patient', `${verb} this patient account?`))) return;
+    try { const d = await API.put(`/api/staff/patients/${id}/status`); UI.okToast(d.message); load(); }
+    catch (e) { UI.errToast(e.message); }
+  };
+
+  document.getElementById('refresh-btn').onclick = load;
+  document.getElementById('search-box').addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
+  load();
+})();
+</script>
+<div id="toasts"></div>
+</body>
+</html>

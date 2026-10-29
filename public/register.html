@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Register — BloodLink</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="auth-wrap">
+  <div class="auth-card wide">
+    <div class="brandline"><span class="drop"><span>B</span></span><h1>Create Account</h1></div>
+    <p class="sub">Join as a blood donor or a patient who needs blood</p>
+    <form id="reg-form">
+      <div class="form-grid">
+        <div class="field full">
+          <label>I am registering as *</label>
+          <select name="role" id="role-select" required>
+            <option value="donor">Donor — I want to give blood</option>
+            <option value="patient">Patient — I need blood</option>
+          </select>
+        </div>
+        <div class="field"><label>Username *</label><input name="username" required placeholder="Min. 4 characters"></div>
+        <div class="field"><label>Password *</label><input name="password" type="password" required placeholder="8+ chars, Aa + number"></div>
+        <div class="field"><label>First Name *</label><input name="first_name" required></div>
+        <div class="field"><label>Middle Name</label><input name="middle_name"></div>
+        <div class="field"><label>Last Name *</label><input name="last_name" required></div>
+        <div class="field"><label>Age *</label><input name="age" type="number" min="1" max="119" required></div>
+        <div class="field"><label>Sex *</label>
+          <select name="sex" required><option value="">Select...</option><option>Male</option><option>Female</option></select>
+        </div>
+        <div class="field"><label>Contact Number *</label><input name="contact_number" required placeholder="09xxxxxxxxx"></div>
+        <div class="field"><label>Email *</label><input name="email" type="email" required placeholder="name@email.com"></div>
+        <div class="field"><label>Blood Type *</label>
+          <select name="blood_type" data-blood-types required></select>
+        </div>
+        <div class="field" id="hospital-field"><label>Hospital *</label><input name="hospital" placeholder="Where you are treated"></div>
+        <div class="field full"><label>Address *</label><input name="address" required></div>
+        <div class="field full" id="notes-field"><label>Medical Notes</label>
+          <textarea name="medical_notes" placeholder="Any important medical details..."></textarea>
+        </div>
+      </div>
+      <button class="btn" style="width:100%;margin-top:16px">Create Account</button>
+    </form>
+    <p class="small muted" style="text-align:center;margin-top:16px">
+      Already have an account? <a href="/login">Log in</a>
+    </p>
+  </div>
+</div>
+<div id="toasts"></div>
+<script src="/js/api.js"></script>
+<script src="/js/common.js"></script>
+<script>
+UI.fillBloodSelects();
+
+function toggleFields() {
+  const role = document.getElementById('role-select').value;
+  document.getElementById('hospital-field').style.display = role === 'patient' ? '' : 'none';
+  document.getElementById('notes-field').style.display = role === 'patient' ? '' : 'none';
+}
+document.getElementById('role-select').addEventListener('change', toggleFields);
+toggleFields();
+
+document.getElementById('reg-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const btn = f.querySelector('button');
+  btn.disabled = true; btn.textContent = 'Creating account...';
+  try {
+    const data = await API.post('/api/auth/register', UI.formValues(f));
+    UI.okToast(data.message || 'Account created.');
+    setTimeout(() => location.href = '/dashboard', 600);
+  } catch (err) {
+    UI.errToast(err.message);
+    btn.disabled = false; btn.textContent = 'Create Account';
+  }
+});
+</script>
+</body>
+</html>

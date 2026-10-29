@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Notifications — BloodLink</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/shell.js"></script>
+<script>
+(async () => {
+  const ok = await Shell.init({ title: 'Notifications', active: 'notifications' });
+  if (!ok) return;
+  await load();
+
+  async function load() {
+    const data = await API.get('/api/notifications');
+    const page = Shell.page();
+    const html = data.notifications.map(n => `
+      <div class="card" style="margin-bottom:10px;${n.status === 'unread' ? 'border-left:4px solid var(--red)' : ''}">
+        <div class="toolbar">
+          <div><b>${UI.esc(n.title)}</b><div class="muted small">${UI.fmtDateTime(n.created_at)}</div></div>
+          <span class="spacer"></span>
+          ${n.status === 'unread' ? `<button class="btn slim blue" onclick="markRead(${n.id})">Mark Read</button>` : '<span class="badge gray">read</span>'}
+        </div>
+        <p>${UI.esc(n.message)}</p>
+      </div>`).join('');
+    page.innerHTML = `
+      <div class="toolbar">
+        <h2>${data.unread} unread</h2>
+        <span class="spacer"></span>
+        ${data.unread > 0 ? '<button class="btn slim ghost" onclick="markAllRead()">Mark all read</button>' : ''}
+      </div>
+      ${html || '<div class="empty"><b>No notifications yet</b></div>'}`;
+  }
+
+  window.markRead = async (id) => {
+    await API.put(`/api/notifications/${id}/read`);
+    Shell.refreshBell(); load();
+  };
+  window.markAllRead = async () => {
+    await API.put('/api/notifications/read-all');
+    Shell.refreshBell(); load();
+  };
+})();
+</script>
+<div id="toasts"></div>
+</body>
+</html>

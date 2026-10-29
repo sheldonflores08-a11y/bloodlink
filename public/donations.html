@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Donations — BloodLink</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/shell.js"></script>
+<script>
+(async () => {
+  const ok = await Shell.init({ title: 'Donation Records', active: 'donations' });
+  if (!ok) return;
+  if (!['staff', 'admin', 'superadmin'].includes(Shell.role)) {
+    Shell.page().innerHTML = '<div class="empty"><b>Access denied.</b></div>'; return;
+  }
+  const page = Shell.page();
+  const dd = await API.get('/api/staff/dropdowns');
+  const locOptions = dd.locations.map(l => `<option value="${l.id}">${UI.esc(l.location_name)}</option>`).join('');
+  const today = new Date().toISOString().slice(0, 10);
+
+  page.innerHTML = `
+    <div class="card">
+      <div class="toolbar">
+        <select id="f-status"><option value="">All statuses</option>
+          <option>Pending</option><option>Verified</option><option>Rejected</option></select>
+        <select id="f-donor"><option value="">All donors</option>
+          ${dd.donors.map(d => `<option value="${d.id}">${d.donor_code} — ${UI.esc(d.last_name)}, ${UI.esc(d.first_name)}</option>`).join('')}</select>
+        <button class="btn slim ghost" id="refresh-btn">Refresh</button>
+        <span class="spacer"></span>
+        <button class="btn" id="add-btn">+ Record Donation</button>
+      </div>
+      <div id="don-table"></div>
+      <p class="muted small" style="margin-top:10px">Only <b>Verified</b> donations are added to blood inventory. Pending donations are not in stock.</p>
+    </div>`;
+
+  async function load() {
+    const qs = [];
+    const s = document.getElementById('f-status').value;
+    const dn = document.getElementById('f-donor').value;
+    if (s) qs.push('status=' + s);
+    if (dn) qs.push('donor_id=' + dn);
+    const data = await API.get('/api/staff/donations' + (qs.length ? '?' + qs.join('&') : ''));
+    document.getElementById('don-table').innerHTML = UI.table(
+      ['ID', 'Date', 'Donor', 'Blood', 'Units', 'Location', 'Status', 'Recorded By', 'Actions'],
+      data.donations.map(d => `<tr>
+        <td>#${d.id}</td><td>${UI.fmtDate(d.donation_date)}</td>
+        <td>${UI.esc(d.donor_code)} — ${UI.esc(d.last_name)}, ${UI.esc(d.first_name)}</td>
+        <td>${UI.bloodChip(d.blood_type)}</td><td>${d.blood_units}</td>
+        <td class="small">${UI.esc(d.donation_location)}</td>
+        <td>${UI.statusBadge(d.status)}</td>
+        <td class="muted small">${UI.esc(d.recorded_by_user || '-')}</td>
+        <td>${d.status === 'Pending' ? `
+          <button class="btn slim" onclick="verifyDon(${d.id},'${d.blood_type}',${d.blood_units})">Verify</button>
+          <button class="btn slim danger-outline" onclick="rejectDon(${d.id})">Reject</button>` : '-'}</td>
+      </tr>`).join(''));
+  }
+
+  document.getElementById('add-btn').onclick = () => {
+    if (!document.getElementById('f-donor').options.length) return;
+    UI.fillBloodSelects(false);
+    UI.modal('Record Donation', `
+      <form id="don-add">
+        <div class="form-grid">
+          <div class="field full"><label>Donor *</label>
+            <select name="donor_id" required>
+              ${dd.donors.map(d => `<option value="${d.id}">${d.donor_code} — ${UI.esc(d.last_name)}, ${UI.esc(d.first_name)} (${d.blood_type})</option>`).join('')}
+            </select></div>
+          <div class="field"><label>Blood Type *</label><select name="blood_type" data-blood-types required></select></div>
+          <div class="field"><label>Units *</label><input name="blood_units" type="number" min="1" required value="1"></div>
+          <div class="field"><label>Donation Date *</label><input name="donation_date" type="date" max="${today}" required value="${today}"></div>
+          <div class="field"><label>Donation Location *</label><input name="donation_location" required placeholder="Where the donation took place"></div>
+        </div>
+      </form>`,
+      `<button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
+       <button class="btn" onclick="saveDonation()">Save Donation</button>`);
+  };
+
+  window.saveDonation = async () => {
+    const form = document.getElementById('don-add');
+    if (!form.reportValidity()) return;
+    try {
+      const d = await API.post('/api/staff/donations', UI.formValues(form));
+      UI.closeModal(); UI.okToast(d.message); load();
+    } catch (e) { UI.errToast(e.message); }
+  };
+
+  window.verifyDon = (id, bloodType, units) => {
+    UI.modal(`Verify Donation — ${units} unit(s) of ${bloodType}`, `
+      <p class="muted small" style="margin-bottom:10px">Verified blood becomes available inventory at the chosen location.</p>
+      <div class="field"><label>Receiving Location *</label><select id="verify-loc">${locOptions}</select></div>
+      <div class="field" style="margin-top:8px"><label>Expiration Date</label>
+        <input id="verify-exp" type="date" value="${defaultExp()}"></div>`,
+      `<button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
+       <button class="btn" onclick="doVerify(${id})">Verify &amp; Add to Inventory</button>`);
+  };
+
+  window.doVerify = async (id) => {
+    const payload = {
+      location_id: Number(document.getElementById('verify-loc').value),
+      expiration_date: document.getElementById('verify-exp').value
+    };
+    UI.closeModal();
+    try {
+      const d = await API.put(`/api/staff/donations/${id}/verify`, payload);
+      UI.okToast(d.message); load();
+    } catch (e) { UI.errToast(e.message); }
+  };
+
+  window.rejectDon = async (id) => {
+    if (!(await UI.confirm('Reject donation', 'Reject this donation? The blood will NOT be added to inventory.'))) return;
+    try {
+      const d = await API.put(`/api/staff/donations/${id}/reject`);
+      UI.okToast(d.message); load();
+    } catch (e) { UI.errToast(e.message); }
+  };
+
+  function defaultExp() {
+    const dt = new Date(); dt.setDate(dt.getDate() + 35);
+    return dt.toISOString().slice(0, 10);
+  }
+
+  document.getElementById('refresh-btn').onclick = load;
+  document.getElementById('f-status').addEventListener('change', load);
+  document.getElementById('f-donor').addEventListener('change', load);
+  load();
+})();
+</script>
+<div id="toasts"></div>
+</body>
+</html>

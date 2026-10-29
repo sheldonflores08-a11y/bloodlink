@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Activity Logs — BloodLink</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/shell.js"></script>
+<script>
+(async () => {
+  const ok = await Shell.init({ title: 'System Activity Logs', active: 'logs' });
+  if (!ok) return;
+  if (!['admin', 'superadmin'].includes(Shell.role)) {
+    Shell.page().innerHTML = '<div class="empty"><b>Only administrators can view activity logs.</b></div>'; return;
+  }
+  const page = Shell.page();
+  page.innerHTML = `
+    <div class="card">
+      <div class="toolbar">
+        <input id="f-user" placeholder="Filter by username..." style="max-width:220px">
+        <button class="btn slim ghost" id="run-btn">Filter</button>
+      </div>
+      <div id="log-list"></div>
+    </div>`;
+
+  async function load() {
+    const q = document.getElementById('f-user').value;
+    const data = await API.get('/api/admin/logs' + (q ? `?username=${encodeURIComponent(q)}` : ''));
+    document.getElementById('log-list').innerHTML = UI.table(
+      ['When', 'User', 'Action', 'Description'],
+      data.logs.map(l => `<tr>
+        <td class="muted small">${UI.fmtDateTime(l.created_at)}</td>
+        <td><b>${UI.esc(l.username || 'system')}</b></td>
+        <td>${UI.esc(l.action)}</td>
+        <td class="small">${UI.esc(l.description)}</td>
+      </tr>`).join(''));
+  }
+  document.getElementById('run-btn').onclick = load;
+  document.getElementById('f-user').addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
+  load();
+})();
+</script>
+<div id="toasts"></div>
+</body>
+</html>

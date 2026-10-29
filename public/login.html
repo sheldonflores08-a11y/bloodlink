@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Login — BloodLink</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="auth-wrap">
+  <div class="auth-card">
+    <div class="brandline"><span class="drop"><span>B</span></span><h1>BloodLink</h1></div>
+    <p class="sub">Log in to continue</p>
+    <form id="login-form">
+      <div class="field" style="margin-bottom:12px">
+        <label>Username</label>
+        <input name="username" autocomplete="username" required placeholder="Enter username">
+      </div>
+      <div class="field" style="margin-bottom:16px">
+        <label>Password</label>
+        <input name="password" type="password" autocomplete="current-password" required placeholder="Enter password">
+      </div>
+      <button class="btn" style="width:100%">Login</button>
+    </form>
+    <p class="small muted" style="text-align:center;margin-top:16px">
+      New donor or patient? <a href="/register">Create an account</a>
+    </p>
+  </div>
+</div>
+<div id="toasts"></div>
+<script src="/js/api.js"></script>
+<script src="/js/common.js"></script>
+<script>
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const btn = f.querySelector('button');
+  btn.disabled = true; btn.textContent = 'Logging in...';
+  try {
+    const data = await API.post('/api/auth/login', UI.formValues(f));
+    UI.okToast(data.message || 'Login successful.');
+    // Send every user to the right dashboard for their role.
+    setTimeout(() => location.href = '/dashboard', 400);
+  } catch (err) {
+    UI.errToast(err.message);
+    btn.disabled = false; btn.textContent = 'Login';
+  }
+});
+</script>
+</body>
+</html>

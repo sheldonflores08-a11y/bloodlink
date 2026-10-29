@@ -1,0 +1,24 @@
+{
+  "name": "bloodlink",
+  "version": "1.0.0",
+  "description": "BloodLink: Blood Donation, Inventory, and Blood Availability Mapping System",
+  "main": "server.js",
+  "scripts": {
+    "setup": "node database/init-db.js",
+    "reset": "node database/init-db.js --reset",
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "blood-donation",
+    "blood-inventory",
+    "blood-bank",
+    "leaflet"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.10.0",
+    "express": "^4.21.2"
+  }
+}

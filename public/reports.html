@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reports — BloodLink</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/shell.js"></script>
+<script>
+(async () => {
+  const ok = await Shell.init({ title: 'Reports', active: 'reports' });
+  if (!ok) return;
+  if (!['staff', 'admin', 'superadmin'].includes(Shell.role)) {
+    Shell.page().innerHTML = '<div class="empty"><b>Access denied.</b></div>'; return;
+  }
+  const page = Shell.page();
+  const reports = [
+    ['inventory', 'Blood Inventory'], ['donors', 'Donors'], ['patients', 'Patients'],
+    ['donations', 'Donations'], ['requests', 'Blood Requests'],
+    ['locations', 'Location Availability'], ['usage', 'Blood Usage (Verified)']
+  ];
+  page.innerHTML = `
+    <div class="card">
+      <div class="toolbar">
+        <select id="r-type">${reports.map(([v, l]) => `<option value="${v}">${l} Report</option>`).join('')}</select>
+        <select id="r-blood" data-blood-types data-blood-all></select>
+        <select id="r-status"><option value="">All statuses</option>
+          ${['Pending','Verified','Rejected','Available','Reserved','Used','Expired','Unavailable','Approved','Processing','Completed','Cancelled','active','inactive'].map(s => `<option>${s}</option>`).join('')}</select>
+        <label class="small muted">From</label><input type="date" id="r-from" style="width:150px">
+        <label class="small muted">To</label><input type="date" id="r-to" style="width:150px">
+        <button class="btn slim" id="run-btn">Run Report</button>
+        <span class="spacer"></span>
+        <button class="btn slim ghost" id="print-btn">&#128424; Print / Export</button>
+      </div>
+      <div id="report-area"></div>
+    </div>`;
+  UI.fillBloodSelects(true);
+
+  function reportHeader(row) {
+    return Object.keys(row).map(k => `<th>${k.replace(/_/g, ' ')}</th>`).join('');
+  }
+  function renderRow(row) {
+    return Object.entries(row).map(([k, v]) => {
+      if (k === 'blood_type' || k === 'blood_type_needed') return `<td>${UI.bloodChip(v)}</td>`;
+      if (/_date$|created_at|updated_at/.test(k)) return `<td>${UI.fmtDate(v)}</td>`;
+      if (k === 'status') return `<td>${UI.statusBadge(v)}</td>`;
+      return `<td>${UI.esc(v)}</td>`;
+    }).join('');
+  }
+
+  async function run() {
+    const qs = [];
+    const q = {
+      blood_type: document.getElementById('r-blood').value,
+      status: document.getElementById('r-status').value,
+      from: document.getElementById('r-from').value,
+      to: document.getElementById('r-to').value
+    };
+    for (const [k, v] of Object.entries(q)) if (v && v !== 'ALL') qs.push(`${k}=${encodeURIComponent(v)}`);
+    const type = document.getElementById('r-type').value;
+    const data = await API.get(`/api/admin/reports/${type}` + (qs.length ? '?' + qs.join('&') : ''));
+    if (!data.rows.length) {
+      document.getElementById('report-area').innerHTML =
+        '<div class="empty"><b>No data matched your filters.</b></div>';
+      return;
+    }
+    document.getElementById('report-area').innerHTML = `
+      <div class="table-wrap"><table>
+        <thead><tr>${reportHeader(data.rows[0])}</tr></thead>
+        <tbody>${data.rows.map(renderRow).join('')}</tbody>
+      </table></div>
+      <p class="muted small" style="margin-top:8px">${data.rows.length} record(s) — generated ${new Date().toLocaleString()}</p>`;
+  }
+
+  document.getElementById('run-btn').onclick = run;
+  document.getElementById('print-btn').onclick = () => window.print();
+  run();
+})();
+</script>
+<div id="toasts"></div>
+</body>
+</html>

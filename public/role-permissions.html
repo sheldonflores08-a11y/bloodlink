@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Roles & Permissions — BloodLink</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/shell.js"></script>
+<script>
+(async () => {
+  const ok = await Shell.init({ title: 'Roles & Permissions', active: 'roles' });
+  if (!ok) return;
+  if (Shell.role !== 'superadmin') {
+    Shell.page().innerHTML = '<div class="empty"><b>Only the Super Admin can manage roles and permissions.</b></div>'; return;
+  }
+  const page = Shell.page();
+  const data = await API.get('/api/admin/permissions');
+  const matrix = { staff: {}, admin: {} };
+  for (const r of data.staff_only) matrix.staff[r.module] = !!r.can_access;
+  for (const r of data.admin) matrix.admin[r.module] = !!r.can_access;
+
+  const db = (await API.get('/api/admin/users')).users;
+  page.innerHTML = `
+    <div class="grid cols-2">
+      <div class="card">
+        <h2>Module Permissions</h2>
+        <p class="muted small" style="margin-bottom:10px">Toggle which modules each role can open. Super Admin always has full access.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Module</th><th>Staff</th><th>Admin</th></tr></thead>
+          <tbody>${data.modules.map(m => `<tr>
+            <td><b>${m}</b></td>
+            <td><input type="checkbox" data-role="staff" data-mod="${m}" ${matrix.staff[m] ? 'checked' : ''}></td>
+            <td><input type="checkbox" data-role="admin" data-mod="${m}" ${matrix.admin[m] ? 'checked' : ''}></td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+        <button class="btn" id="save-btn" style="margin-top:10px">Save Permissions</button>
+      </div>
+      <div class="card">
+        <h2>Role Overview</h2>
+        <p class="muted small" style="margin-bottom:10px">Every account in the system and its role level.</p>
+        ${UI.table(['Username', 'Role', 'Status'],
+          db.map(u => `<tr><td>${UI.esc(u.username)}</td><td><span class="badge dark">${u.role}</span></td><td>${UI.statusBadge(u.status)}</td></tr>`).join(''))}
+      </div>
+    </div>`;
+
+  document.getElementById('save-btn').onclick = async () => {
+    const payload = { staff: {}, admin: {} };
+    for (const cb of document.querySelectorAll('input[type=checkbox][data-role]')) {
+      payload[cb.dataset.role][cb.dataset.mod] = cb.checked;
+    }
+    try {
+      const d = await API.put('/api/admin/permissions', payload);
+      UI.okToast(d.message);
+    } catch (e) { UI.errToast(e.message); }
+  };
+})();
+</script>
+<div id="toasts"></div>
+</body>
+</html>

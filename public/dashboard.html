@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard — BloodLink</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/shell.js"></script>
+<script>
+(async () => {
+  const ok = await Shell.init({ title: 'Dashboard', active: 'dashboard' });
+  if (!ok) return;
+  const page = Shell.page();
+  const role = Shell.role;
+  page.innerHTML = '<p class="muted">Loading dashboard...</p>';
+
+  try {
+    if (role === 'admin' || role === 'superadmin' || role === 'staff') {
+      await renderOpsDashboard(role);
+    } else if (role === 'donor') {
+      await renderDonorDashboard();
+    } else {
+      await renderPatientDashboard();
+    }
+  } catch (e) {
+    UI.errToast(e.message);
+  }
+
+  /* --------- staff / admin / super admin --------- */
+  async function renderOpsDashboard(role) {
+    const d = (await API.get('/api/dashboard')).dashboard;
+    const c = d.counts;
+    const stat = (num, lbl) => `<div class="card stat"><span class="num">${num}</span><span class="lbl">${lbl}</span></div>`;
+    page.innerHTML = `
+      <div class="grid cols-4">
+        ${stat(c.donors, 'Active Donors')}
+        ${stat(c.patients, 'Active Patients')}
+        ${role !== 'staff' ? stat(c.staff, 'Staff Accounts') : stat(c.pending_donations, 'Pending Donations')}
+        ${stat(c.total_units, 'Available Blood Units')}
+        ${stat(c.pending_requests, 'Pending Requests')}
+        ${stat(c.approved_requests, 'Approved / Processing')}
+        ${stat(c.locations, 'Active Locations')}
+        ${stat(c.pending_donations, 'Donations to Verify')}
+      </div>
+      <div class="grid cols-3" style="margin-top:16px">
+        <div class="card"><h2>Blood Availability by Type</h2><div id="bytype" class="blood-line"></div></div>
+        <div class="card"><h2>Recent Donations</h2><div id="rdon"></div></div>
+        <div class="card"><h2>Recent Requests</h2><div id="rreq"></div></div>
+      </div>
+      ${d.recent_logs ? `<div class="card" style="margin-top:16px"><h2>Recent Activity</h2><div id="rlog"></div></div>` : ''}`;
+    document.getElementById('bytype').innerHTML =
+      ['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(t => {
+        const u = (d.by_type.find(x => x.blood_type === t) || {}).units || 0;
+        return `<span class="chip">${t}: ${u}</span>`;
+      }).join('');
+    document.getElementById('rdon').innerHTML = d.recent_donations.map(x =>
+      `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)">
+        <span>${UI.esc(x.first_name)} ${UI.esc(x.last_name)} — ${x.blood_units} unit(s) of ${UI.bloodChip(x.blood_type)}</span>
+        <span>${UI.statusBadge(x.status)}</span></div>`).join('') || '<span class="muted">None yet.</span>';
+    document.getElementById('rreq').innerHTML = d.recent_requests.map(x =>
+      `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)">
+        <span>${UI.esc(x.first_name)} ${UI.esc(x.last_name)} — ${x.units_needed} unit(s) ${UI.bloodChip(x.blood_type)}</span>
+        <span>${UI.statusBadge(x.status)}</span></div>`).join('') || '<span class="muted">None yet.</span>';
+    if (d.recent_logs) document.getElementById('rlog').innerHTML = d.recent_logs.map(x =>
+      `<div class="small" style="padding:5px 0;border-bottom:1px solid var(--line)">
+        <b>${UI.esc(x.action)}</b> — ${UI.esc(x.description)}
+        <span class="muted"> (${UI.esc(x.username || 'system')} · ${UI.fmtDateTime(x.created_at)})</span></div>`).join('') || '<span class="muted">None yet.</span>';
+  }
+
+  /* --------- donor --------- */
+  async function renderDonorDashboard() {
+    const [stats, history] = await Promise.all([
+      API.get('/api/donor/stats'),
+      API.get('/api/donor/history')
+    ]);
+    const s = stats.stats;
+    page.innerHTML = `
+      <div class="grid cols-3">
+        <div class="card" style="text-align:center">
+          <h3>My Blood Type</h3>
+          <div>${UI.bloodChip(s.blood_type, true)}</div>
+        </div>
+        <div class="card stat"><span class="num">${s.total_donations}</span><span class="lbl">Total Donations</span></div>
+        <div class="card stat"><span class="num">${s.verified_units}</span><span class="lbl">Verified Units Given</span></div>
+      </div>
+      <div class="grid cols-2" style="margin-top:16px">
+        <div class="card"><h2>Recent Donations</h2>
+          <div id="don-list"></div>
+          <a href="/history" class="btn ghost slim" style="margin-top:10px">View Full History</a></div>
+        <div class="card"><h2>Quick Actions</h2>
+          <a href="/profile" class="btn ghost" style="margin:4px">Complete My Profile</a>
+          <a href="/map" class="btn ghost" style="margin:4px">Nearby Donation Locations</a>
+          <a href="/search" class="btn" style="margin:4px">Search Available Blood</a></div>
+      </div>`;
+    document.getElementById('don-list').innerHTML = history.donations.slice(0, 4).map(x =>
+      `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)">
+        <span>${UI.bloodChip(x.blood_type)} ${x.blood_units} unit(s) — ${UI.fmtDate(x.donation_date)}</span>
+        ${UI.statusBadge(x.status)}</div>`).join('') || '<span class="muted">No donations recorded yet.</span>';
+  }
+
+  /* --------- patient --------- */
+  async function renderPatientDashboard() {
+    const [me, reqs] = await Promise.all([
+      API.get('/api/auth/me'),
+      API.get('/api/patient/requests')
+    ]);
+    const p = me.profile;
+    page.innerHTML = `
+      <div class="grid cols-3">
+        <div class="card" style="text-align:center">
+          <h3>Blood Type Needed</h3>
+          <div>${UI.bloodChip(p.blood_type_needed, true)}</div>
+        </div>
+        <div class="card"><h2>My Hospital</h2><p>${UI.esc(p.hospital)}</p>
+          <p class="muted small" style="margin-top:8px">${UI.esc(p.medical_notes || '')}</p></div>
+        <div class="card"><h2>Quick Actions</h2>
+          <a href="/search" class="btn" style="margin:4px">Search Blood</a>
+          <a href="/map" class="btn ghost" style="margin:4px">Blood Map</a>
+          <a href="/requests" class="btn ghost" style="margin:4px">My Requests</a></div>
+      </div>
+      <div class="card" style="margin-top:16px"><h2>My Blood Requests</h2><div id="req-list"></div></div>`;
+    document.getElementById('req-list').innerHTML = reqs.requests.slice(0, 5).map(x =>
+      `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)">
+        <span>${x.units_needed} unit(s) ${UI.bloodChip(x.blood_type)} — ${UI.fmtDate(x.request_date)} <span class="muted small">(${UI.esc(x.priority)})</span></span>
+        ${UI.statusBadge(x.status)}</div>`).join('') || '<span class="muted">No requests yet. Submit one from the My Requests page.</span>';
+  }
+})();
+</script>
+<div id="toasts"></div>
+</body>
+</html>

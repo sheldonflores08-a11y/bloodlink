@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blood Locations — BloodLink</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/shell.js"></script>
+<script src="/js/map.js"></script>
+<script>
+(async () => {
+  const ok = await Shell.init({ title: 'Blood Locations', active: 'locations' });
+  if (!ok) return;
+  if (!['staff', 'admin', 'superadmin'].includes(Shell.role)) {
+    Shell.page().innerHTML = '<div class="empty"><b>Access denied.</b></div>'; return;
+  }
+  const page = Shell.page();
+  page.innerHTML = `
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn slim ghost" id="refresh-btn">Refresh</button>
+        <span class="spacer"></span>
+        <button class="btn" id="add-btn">+ Add Location</button>
+      </div>
+      <div id="loc-table"></div>
+    </div>
+    <div class="card" style="margin-top:16px"><h2>Live Map</h2><div id="map" class="map-box" style="height:340px"></div></div>`;
+
+  async function load() {
+    const data = await API.get('/api/staff/locations');
+    document.getElementById('loc-table').innerHTML = UI.table(
+      ['ID', 'Name', 'Address', 'Coordinates', 'Contact', 'Available Units', 'Status', 'Actions'],
+      data.locations.map(l => `<tr>
+        <td>#${l.id}</td>
+        <td><b>${UI.esc(l.location_name)}</b></td>
+        <td class="small">${UI.esc(l.address)}</td>
+        <td class="small muted">${l.latitude.toFixed(4)}, ${l.longitude.toFixed(4)}</td>
+        <td>${UI.esc(l.contact_number)}</td>
+        <td><b>${l.available_units}</b></td>
+        <td>${UI.statusBadge(l.available_status === 'Active' ? 'active' : 'inactive')}</td>
+        <td>
+          <button class="btn slim ghost" onclick='editLoc(${JSON.stringify(l).replace(/'/g, "&#39;")})'>Edit</button>
+          <button class="btn slim ${l.available_status === 'Active' ? 'danger-outline' : 'blue'}" onclick="toggleLoc(${l.id},'${l.available_status}')">${l.available_status === 'Active' ? 'Deactivate' : 'Activate'}</button>
+        </td></tr>`).join(''));
+
+    const live = data.locations.filter(l => l.available_status === 'Active');
+    if (BloodMap.map) {
+      BloodMap.render(await toMapFormat(live));
+    } else {
+      await BloodMap.create('map');
+      BloodMap.render(await toMapFormat(live));
+    }
+  }
+
+  async function toMapFormat(locations) {
+    const mapData = await API.get('/api/blood/map');
+    return locations.map(l => {
+      const m = mapData.locations.find(x => x.location_id === l.id);
+      return { ...l, blood: (m && m.blood) || {} };
+    });
+  }
+
+  function locForm(l) {
+    return `
+      <form id="loc-form">
+        <div class="form-grid">
+          <div class="field full"><label>Location Name *</label><input name="location_name" required value="${UI.esc(l.location_name || '')}"></div>
+          <div class="field full"><label>Address *</label><input name="address" required value="${UI.esc(l.address || '')}"></div>
+          <div class="field"><label>Latitude *</label><input name="latitude" required type="number" step="any" min="-90" max="90" value="${l.latitude || '17.0'}"></div>
+          <div class="field"><label>Longitude *</label><input name="longitude" required type="number" step="any" min="-180" max="180" value="${l.longitude || '121.9'}"></div>
+          <div class="field full"><label>Contact Number *</label><input name="contact_number" required value="${UI.esc(l.contact_number || '')}"></div>
+        </div>
+      </form>`;
+  }
+
+  document.getElementById('add-btn').onclick = () => {
+    UI.modal('Add Blood Location', locForm({}),
+      `<button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
+       <button class="btn" onclick="saveLoc()">Add Location</button>`);
+  };
+
+  window.editLoc = (l) => {
+    UI.modal(`Edit Location — ${l.location_name}`, locForm(l),
+      `<button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
+       <button class="btn" onclick="saveLoc(${l.id})">Save Changes</button>`);
+  };
+
+  window.saveLoc = async (id) => {
+    const form = document.getElementById('loc-form');
+    if (!form.reportValidity()) return;
+    const values = UI.formValues(form);
+    try {
+      const d = id
+        ? await API.put(`/api/staff/locations/${id}`, values)
+        : await API.post('/api/staff/locations', values);
+      UI.closeModal(); UI.okToast(d.message); load();
+    } catch (e) { UI.errToast(e.message); }
+  };
+
+  window.toggleLoc = async (id, current) => {
+    const verb = current === 'Active' ? 'Deactivate' : 'Activate';
+    if (!(await UI.confirm(verb + ' location', `${verb} this location? ${current === 'Active' ? 'Its blood will no longer appear in search/map.' : 'Its blood will appear in search/map again.'}`))) return;
+    try { const d = await API.put(`/api/staff/locations/${id}/status`); UI.okToast(d.message); load(); }
+    catch (e) { UI.errToast(e.message); }
+  };
+
+  document.getElementById('refresh-btn').onclick = load;
+  load();
+})();
+</script>
+<div id="toasts"></div>
+</body>
+</html>

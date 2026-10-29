@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Users — BloodLink</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/shell.js"></script>
+<script>
+(async () => {
+  const ok = await Shell.init({ title: 'User Management', active: 'users' });
+  if (!ok) return;
+  const isSuper = Shell.role === 'superadmin';
+  if (Shell.role === 'donor' || Shell.role === 'patient') {
+    Shell.page().innerHTML = '<div class="empty"><b>Access denied.</b></div>'; return;
+  }
+  const page = Shell.page();
+  page.innerHTML = `
+    <div class="card">
+      <div class="toolbar">
+        <span class="muted small">${isSuper
+          ? 'Super Admin can create staff and admin accounts and deactivate any of them.'
+          : 'Admin can create and manage staff accounts.'}</span>
+        <span class="spacer"></span>
+        <button class="btn" id="add-btn">+ Create User</button>
+      </div>
+      <div id="user-table"></div>
+    </div>`;
+
+  async function load() {
+    const data = await API.get('/api/admin/users');
+    document.getElementById('user-table').innerHTML = UI.table(
+      ['ID', 'Username', 'Role', 'Status', 'Created', 'Actions'],
+      data.users.map(u => `<tr>
+        <td>#${u.id}</td>
+        <td><b>${UI.esc(u.username)}</b></td>
+        <td><span class="badge dark">${UI.esc(u.role)}</span></td>
+        <td>${UI.statusBadge(u.status)}</td>
+        <td class="muted small">${UI.fmtDate(u.created_at)}</td>
+        <td>${u.role === 'superadmin' ? '<span class="muted small">Protected</span>' : `
+          <button class="btn slim ghost" onclick="editUser(${u.id},'${UI.esc(u.username)}')">Edit</button>
+          <button class="btn slim ${u.status === 'active' ? 'danger-outline' : 'blue'}" onclick="toggleUser(${u.id},'${u.status}')">${u.status === 'active' ? 'Deactivate' : 'Activate'}</button>`}
+        </td></tr>`).join(''));
+  }
+
+  document.getElementById('add-btn').onclick = () => {
+    UI.modal('Create User', `
+      <form id="user-form">
+        <div class="form-grid">
+          <div class="field"><label>Username *</label><input name="username" required placeholder="Min. 4 characters"></div>
+          <div class="field"><label>Password *</label><input name="password" required placeholder="8+ chars, Aa + number"></div>
+          <div class="field full"><label>Role *</label>
+            <select name="role">
+              <option value="staff">Staff</option>
+              ${isSuper ? '<option value="admin">Admin</option>' : ''}
+            </select></div>
+        </div>
+      </form>`,
+      `<button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
+       <button class="btn" onclick="saveUser()">Create User</button>`);
+  };
+
+  window.saveUser = async () => {
+    const form = document.getElementById('user-form');
+    if (!form.reportValidity()) return;
+    try {
+      const d = await API.post('/api/admin/users', UI.formValues(form));
+      UI.closeModal(); UI.okToast(d.message); load();
+    } catch (e) { UI.errToast(e.message); }
+  };
+
+  window.editUser = (id, username) => {
+    UI.modal(`Edit User — ${username}`, `
+      <form id="user-form">
+        <div class="grid cols-1" style="display:grid;gap:10px">
+          <div class="field"><label>New Username (optional)</label><input name="username"></div>
+          <div class="field"><label>New Password (optional)</label><input name="password"></div>
+        </div>
+      </form>`,
+      `<button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
+       <button class="btn" onclick="updateUser(${id})">Save Changes</button>`);
+  };
+
+  window.updateUser = async (id) => {
+    const values = {};
+    const u = document.querySelector('#user-form [name=username]').value;
+    const p = document.querySelector('#user-form [name=password]').value;
+    if (u) values.username = u;
+    if (p) values.password = p;
+    if (!Object.keys(values).length) { UI.errToast('Nothing to change.'); return; }
+    try {
+      const d = await API.put(`/api/admin/users/${id}`, values);
+      UI.closeModal(); UI.okToast(d.message); load();
+    } catch (e) { UI.errToast(e.message); }
+  };
+
+  window.toggleUser = async (id, current) => {
+    const verb = current === 'active' ? 'Deactivate' : 'Activate';
+    if (!(await UI.confirm(verb + ' user', `${verb} this account? Deactivated users cannot log in.`))) return;
+    try {
+      const d = await API.put(`/api/admin/users/${id}`, { status: current === 'active' ? 'inactive' : 'active' });
+      UI.okToast(d.message); load();
+    } catch (e) { UI.errToast(e.message); }
+  };
+
+  load();
+})();
+</script>
+<div id="toasts"></div>
+</body>
+</html>

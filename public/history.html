@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Donation History — BloodLink</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/shell.js"></script>
+<script>
+(async () => {
+  const ok = await Shell.init({ title: 'My Donation History', active: 'history' });
+  if (!ok) return;
+  if (Shell.role !== 'donor') {
+    Shell.page().innerHTML = '<div class="empty"><b>This page is for donor accounts only.</b></div>';
+    return;
+  }
+  const page = Shell.page();
+  try {
+    const data = await API.get('/api/donor/history');
+    const rows = data.donations.map(d => `
+      <tr>
+        <td>${UI.fmtDate(d.donation_date)}</td>
+        <td>${UI.bloodChip(d.blood_type)}</td>
+        <td>${d.blood_units}</td>
+        <td>${UI.esc(d.donation_location)}</td>
+        <td>${UI.statusBadge(d.status)}</td>
+      </tr>`).join('');
+    page.innerHTML = `
+      <div class="card">
+        <div class="toolbar">
+          <h2>All donations</h2>
+          <span class="spacer"></span>
+          <span class="muted small">"Verified" donations are added to blood inventory after staff review.</span>
+        </div>
+        ${UI.table(['Date', 'Blood Type', 'Units', 'Location', 'Status'], rows)}
+      </div>`;
+  } catch (e) {
+    UI.errToast(e.message);
+  }
+})();
+</script>
+<div id="toasts"></div>
+</body>
+</html>

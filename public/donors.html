@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Donors — BloodLink</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/shell.js"></script>
+<script>
+(async () => {
+  const ok = await Shell.init({ title: 'Donor Management', active: 'donors' });
+  if (!ok) return;
+  if (!['staff', 'admin', 'superadmin'].includes(Shell.role)) {
+    Shell.page().innerHTML = '<div class="empty"><b>Access denied.</b></div>'; return;
+  }
+  const page = Shell.page();
+  page.innerHTML = `
+    <div class="card">
+      <div class="toolbar">
+        <input id="search-box" placeholder="Search name, ID, blood type..." style="max-width:300px">
+        <button class="btn slim ghost" id="refresh-btn">Refresh</button>
+        <span class="spacer"></span>
+        <button class="btn" id="add-btn">+ Add Donor</button>
+      </div>
+      <div id="donor-table"></div>
+    </div>`;
+
+  function donorFormValues(d) {
+    UI.fillBloodSelects(false);
+    return `
+      <div class="form-grid">
+        <div class="field"><label>First Name *</label><input name="first_name" required value="${UI.esc(d.first_name || '')}"></div>
+        <div class="field"><label>Middle Name</label><input name="middle_name" value="${UI.esc(d.middle_name || '')}"></div>
+        <div class="field"><label>Last Name *</label><input name="last_name" required value="${UI.esc(d.last_name || '')}"></div>
+        <div class="field"><label>Age *</label><input name="age" type="number" min="1" max="119" required value="${d.age || ''}"></div>
+        <div class="field"><label>Sex *</label>
+          <select name="sex" required><option value="">Select...</option>
+          <option ${d.sex === 'Male' ? 'selected' : ''}>Male</option>
+          <option ${d.sex === 'Female' ? 'selected' : ''}>Female</option></select></div>
+        <div class="field"><label>Blood Type *</label><select name="blood_type" data-blood-types required></select></div>
+        <div class="field"><label>Contact Number *</label><input name="contact_number" required value="${UI.esc(d.contact_number || '')}"></div>
+        <div class="field"><label>Email *</label><input name="email" type="email" required value="${UI.esc(d.email || '')}"></div>
+        <div class="field full"><label>Address *</label><input name="address" required value="${UI.esc(d.address || '')}"></div>
+      </div>`;
+  }
+
+  async function load() {
+    const q = document.getElementById('search-box').value;
+    const data = await API.get('/api/staff/donors' + (q ? `?search=${encodeURIComponent(q)}` : ''));
+    document.getElementById('donor-table').innerHTML = UI.table(
+      ['Donor ID', 'Name', 'Age/Sex', 'Contact', 'Blood Type', 'Donations', 'Units', 'Status', 'Actions'],
+      data.donors.map(d => `<tr>
+        <td>${UI.esc(d.donor_code)}</td>
+        <td>${UI.esc(d.first_name)} ${UI.esc(d.middle_name || '')} ${UI.esc(d.last_name)}</td>
+        <td>${d.age} / ${UI.esc(d.sex)}</td>
+        <td>${UI.esc(d.contact_number)}</td>
+        <td>${UI.bloodChip(d.blood_type)}</td>
+        <td>${d.donation_count}</td><td>${d.verified_units}</td>
+        <td>${UI.statusBadge(d.status)}</td>
+        <td>
+          <button class="btn slim ghost" onclick='editDonor(${JSON.stringify(d).replace(/'/g, "&#39;")})'>Edit</button>
+          <button class="btn slim ${d.status === 'active' ? 'danger-outline' : 'blue'}" onclick="toggleStatus(${d.id},'${d.status}')">${d.status === 'active' ? 'Deactivate' : 'Activate'}</button>
+        </td></tr>`).join(''));
+  }
+
+  window.editDonor = (d) => {
+    UI.modal(`Edit Donor — ${d.donor_code}`,
+      `<form id="donor-edit">${donorFormValues(d)}</form>`,
+      `<button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
+       <button class="btn" onclick="saveDonor(${d.id})">Save Changes</button>`);
+    document.querySelector('#donor-edit select[name=blood_type]').value = d.blood_type;
+  };
+
+  document.getElementById('add-btn').onclick = () => {
+    UI.modal('Add Donor',
+      `<form id="donor-edit">${donorFormValues({})}</form>
+       <p class="muted small" style="margin-top:8px">A login account is created automatically (ID-based username/password).</p>`,
+      `<button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
+       <button class="btn" onclick="saveDonor(null)">Add Donor</button>`);
+  };
+
+  window.saveDonor = async (id) => {
+    const form = document.getElementById('donor-edit');
+    const values = UI.formValues(form);
+    if (!form.reportValidity()) return;
+    try {
+      const d = id
+        ? await API.put(`/api/staff/donors/${id}`, values)
+        : await API.post('/api/staff/donors', values);
+      UI.closeModal(); UI.okToast(d.message); load();
+    } catch (e) { UI.errToast(e.message); }
+  };
+
+  window.toggleStatus = async (id, current) => {
+    const verb = current === 'active' ? 'Deactivate' : 'Activate';
+    if (!(await UI.confirm(verb + ' donor', `${verb} this donor account? They ${current === 'active' ? 'will not be able to log in.' : 'will be able to log in again.'}`))) return;
+    try { const d = await API.put(`/api/staff/donors/${id}/status`); UI.okToast(d.message); load(); }
+    catch (e) { UI.errToast(e.message); }
+  };
+
+  document.getElementById('refresh-btn').onclick = load;
+  document.getElementById('search-box').addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
+  load();
+})();
+</script>
+<div id="toasts"></div>
+</body>
+</html>

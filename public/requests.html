@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blood Requests — BloodLink</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/shell.js"></script>
+<script>
+(async () => {
+  const ok = await Shell.init({ title: 'Blood Requests', active: 'requests' });
+  if (!ok) return;
+  const isOps = ['staff', 'admin', 'superadmin'].includes(Shell.role);
+  if (isOps) { renderStaff(); } else if (Shell.role === 'patient') { renderPatient(); }
+  else { Shell.page().innerHTML = '<div class="empty"><b>Blood requests are managed by patients and staff.</b></div>'; }
+
+  /* ================= PATIENT VIEW ================= */
+  function renderPatient() {
+    const page = Shell.page();
+    UI.fillBloodSelects(false);
+    page.innerHTML = `
+      <div class="grid cols-2">
+        <div class="card">
+          <h2>Submit Blood Request</h2>
+          <form id="req-form">
+            <div class="form-grid">
+              <div class="field"><label>Blood Type Needed *</label>
+                <select name="blood_type" data-blood-types required></select></div>
+              <div class="field"><label>Units Needed *</label>
+                <input name="units_needed" type="number" min="1" required value="1"></div>
+              <div class="field"><label>Priority</label>
+                <select name="priority"><option>Normal</option><option>Urgent</option><option>Critical</option></select></div>
+              <div class="field"><label>Location / Hospital</label>
+                <input name="location" placeholder="Leave empty to use your hospital"></div>
+              <div class="field full"><label>Reason *</label>
+                <textarea name="reason" required placeholder="Why is the blood needed?"></textarea></div>
+            </div>
+            <button class="btn" style="margin-top:10px">Submit Request</button>
+          </form>
+        </div>
+        <div class="card"><h2>Check Availability First</h2>
+          <p class="muted small" style="margin-bottom:12px">See which centers currently have the blood type you need before requesting.</p>
+          <a href="/search" class="btn ghost">&#128269; Search Blood</a>
+          <a href="/map" class="btn ghost">&#128205; Blood Map</a>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h2>My Request History</h2>
+        <div id="req-list"></div>
+      </div>`;
+
+    async function loadPatientList() {
+      const data = await API.get('/api/patient/requests');
+      document.getElementById('req-list').innerHTML = UI.table(
+        ['Date', 'Blood', 'Units', 'Priority', 'Reason', 'Status', ''],
+        data.requests.map(r => `<tr>
+          <td>${UI.fmtDate(r.request_date)}</td><td>${UI.bloodChip(r.blood_type)}</td>
+          <td>${r.units_needed}</td><td>${UI.statusBadge(r.priority)}</td>
+          <td class="muted small">${UI.esc(r.reason)}</td><td>${UI.statusBadge(r.status)}</td>
+          <td>${r.status === 'Pending' ? `<button class="btn slim danger-outline" onclick="cancelReq(${r.id})">Cancel</button>` : ''}</td>
+        </tr>`).join(''));
+    }
+
+    window.cancelReq = async (id) => {
+      if (!(await UI.confirm('Cancel request', 'Cancel this blood request?'))) return;
+      try { const d = await API.put(`/api/patient/requests/${id}/cancel`); UI.okToast(d.message); loadPatientList(); }
+      catch (e) { UI.errToast(e.message); }
+    };
+
+    document.getElementById('req-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const d = await API.post('/api/patient/requests', UI.formValues(e.target));
+        UI.okToast(d.message); e.target.reset(); loadPatientList();
+      } catch (err) { UI.errToast(err.message); }
+    });
+    loadPatientList();
+  }
+
+  /* ================= STAFF / ADMIN VIEW ================= */
+  async function renderStaff() {
+    const page = Shell.page();
+    const dd = await API.get('/api/staff/dropdowns');
+    const locOptions = dd.locations.map(l => `<option value="${l.id}">${UI.esc(l.location_name)}</option>`).join('');
+    page.innerHTML = `
+      <div class="card">
+        <div class="toolbar">
+          <select id="f-status"><option value="">All statuses</option>
+            ${['Pending','Approved','Rejected','Processing','Completed','Cancelled'].map(s => `<option>${s}</option>`).join('')}</select>
+          <button class="btn slim ghost" id="refresh-btn">Refresh</button>
+        </div>
+        <div id="req-table"></div>
+      </div>
+      <datalist id="loc-list">${locOptions}</datalist>`;
+
+    async function loadStaffList() {
+      const status = document.getElementById('f-status').value;
+      const data = await API.get('/api/staff/requests' + (status ? `?status=${status}` : ''));
+      document.getElementById('req-table').innerHTML = UI.table(
+        ['ID', 'Date', 'Patient', 'Blood', 'Units', 'Priority', 'Hospital', 'Status', 'Actions'],
+        data.requests.map(r => `<tr>
+          <td>#${r.id}</td><td>${UI.fmtDate(r.request_date)}</td>
+          <td>${UI.esc(r.patient_code)} — ${UI.esc(r.first_name)} ${UI.esc(r.last_name)}</td>
+          <td>${UI.bloodChip(r.blood_type)}</td><td>${r.units_needed}</td>
+          <td>${UI.statusBadge(r.priority)}</td>
+          <td class="muted small">${UI.esc(r.location || '-')}</td>
+          <td>${UI.statusBadge(r.status)}</td>
+          <td>${actionButtons(r)}</td></tr>`).join(''));
+    }
+
+    function actionButtons(r) {
+      const opts = [];
+      if (r.status === 'Pending') {
+        opts.push(`<button class="btn slim" onclick="approveReq(${r.id},'${r.blood_type}',${r.units_needed})">Approve</button>`);
+        opts.push(`<button class="btn slim danger-outline" onclick="setStatus(${r.id},'Rejected')">Reject</button>`);
+        opts.push(`<button class="btn slim ghost" onclick="setStatus(${r.id},'Cancelled')">Cancel</button>`);
+      } else if (r.status === 'Approved' || r.status === 'Processing') {
+        opts.push(`<button class="btn slim blue" onclick="setStatus(${r.id},'Completed')">Complete</button>`);
+      }
+      return opts.join(' ');
+    }
+
+    window.approveReq = async (id, bloodType, units) => {
+      UI.modal('Approve Request — ' + units + ' unit(s) of ' + bloodType, `
+        <p class="muted small" style="margin-bottom:10px">Blood will be released from the chosen location. Oldest-expiring batches are used first. Inventory cannot go negative.</p>
+        <div class="field"><label>Release from Location *</label>
+          <select id="approve-loc">${locOptions}</select></div>`,
+        `<button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
+         <button class="btn" onclick="doApprove(${id})">Approve &amp; Release Blood</button>`);
+    };
+    window.doApprove = async (id) => {
+      const location_id = document.getElementById('approve-loc').value;
+      UI.closeModal();
+      try {
+        const d = await API.put(`/api/staff/requests/${id}/status`, { status: 'Approved', location_id: Number(location_id) });
+        UI.okToast(d.message); loadStaffList();
+      } catch (e) { UI.errToast(e.message); }
+    };
+    window.setStatus = async (id, status) => {
+      if (!(await UI.confirm('Change status', `Mark this request as ${status}?`))) return;
+      try {
+        const d = await API.put(`/api/staff/requests/${id}/status`, { status });
+        UI.okToast(d.message); loadStaffList();
+      } catch (e) { UI.errToast(e.message); }
+    };
+
+    document.getElementById('f-status').addEventListener('change', loadStaffList);
+    document.getElementById('refresh-btn').addEventListener('click', loadStaffList);
+    loadStaffList();
+  }
+})();
+</script>
+<div id="toasts"></div>
+</body>
+</html>

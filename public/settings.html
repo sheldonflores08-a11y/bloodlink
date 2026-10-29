@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>System Settings — BloodLink</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/shell.js"></script>
+<script>
+(async () => {
+  const ok = await Shell.init({ title: 'System Settings', active: 'settings' });
+  if (!ok) return;
+  if (!['admin', 'superadmin'].includes(Shell.role)) {
+    Shell.page().innerHTML = '<div class="empty"><b>Access denied.</b></div>'; return;
+  }
+  const isSuper = Shell.role === 'superadmin';
+  const page = Shell.page();
+  const data = await API.get('/api/admin/settings');
+  const s = data.settings;
+
+  page.innerHTML = `
+    <div class="grid cols-2">
+      <div class="card">
+        <h2>General Settings</h2>
+        ${isSuper ? `
+          <form id="set-form">
+            <div class="field" style="margin-bottom:10px"><label>System Name</label>
+              <input name="system_name" value="${UI.esc(s.system_name || 'BloodLink')}"></div>
+            <div class="form-grid">
+              <div class="field"><label>Map Center Latitude</label>
+                <input name="map_center_lat" type="number" step="any" value="${UI.esc(s.map_center_lat || '17.03')}"></div>
+              <div class="field"><label>Map Center Longitude</label>
+                <input name="map_center_lng" type="number" step="any" value="${UI.esc(s.map_center_lng || '121.9')}"></div>
+              <div class="field"><label>Map Default Zoom</label>
+                <input name="default_zoom" type="number" min="3" max="18" value="${UI.esc(s.default_zoom || '10')}"></div>
+              <div class="field"><label>Allow Registration</label>
+                <select name="allow_registration">
+                  <option value="1" ${s.allow_registration !== '0' ? 'selected' : ''}>Enabled</option>
+                  <option value="0" ${s.allow_registration === '0' ? 'selected' : ''}>Disabled</option>
+                </select></div>
+            </div>
+            <button class="btn" style="margin-top:12px">Save Settings</button>
+          </form>`
+        : `
+          <p class="muted" style="margin-bottom:10px">Only the Super Admin can modify system settings.</p>
+          <table>${Object.entries(s).map(([k, v]) =>
+            `<tr><th class="muted" style="text-align:left">${k.replace(/_/g,' ')}</th><td>${UI.esc(v)}</td></tr>`).join('')}</table>`}
+      </div>
+      <div class="card">
+        <h2>Database Backup &amp; Restore</h2>
+        ${isSuper ? `
+          <p class="muted small" style="margin-bottom:10px">Download a full copy of the database (SQLite file). Restoring replaces the current database — all users will need to log in again.</p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <a class="btn ghost" href="/api/admin/backup">&#11015; Download Backup</a>
+            <button class="btn danger-outline" id="restore-btn">&#11014; Restore Backup</button>
+            <input type="file" id="restore-file" accept=".db,.sqlite,.sqlite3" style="display:none">
+          </div>`
+        : '<p class="muted">Only the Super Admin can back up or restore the database.</p>'}
+      </div>
+    </div>`;
+
+  if (isSuper) {
+    document.getElementById('set-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const d = await API.put('/api/admin/settings', UI.formValues(e.target));
+        UI.okToast(d.message);
+      } catch (err) { UI.errToast(err.message); }
+    });
+
+    const fileInput = document.getElementById('restore-file');
+    document.getElementById('restore-btn').onclick = () => fileInput.click();
+    fileInput.onchange = async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      if (!(await UI.confirm('Restore backup',
+        `Replace the ENTIRE database with "${file.name}"? This cannot be undone.`))) return;
+      file.arrayBuffer().then(async (buf) => {
+        try {
+          const b64 = btoa(new Uint8Array(buf).reduce((acc, byte) => acc + String.fromCharCode(byte), ''));
+          const d = await API.post('/api/admin/restore', { content: b64 });
+          UI.okToast(d.message);
+          setTimeout(() => location.href = '/login', 1500);
+        } catch (err) { UI.errToast(err.message); }
+      });
+      fileInput.value = '';
+    };
+  }
+})();
+</script>
+<div id="toasts"></div>
+</body>
+</html>

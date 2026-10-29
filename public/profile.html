@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Profile — BloodLink</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<script src="/js/api.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/shell.js"></script>
+<script>
+(async () => {
+  const ok = await Shell.init({ title: 'My Profile', active: 'profile' });
+  if (!ok) return;
+  const page = Shell.page();
+  const role = Shell.role;
+
+  if (role !== 'donor' && role !== 'patient') {
+    page.innerHTML = '<div class="empty"><b>Staff &amp; admin</b> profiles are managed in the Users module.</div>';
+    return;
+  }
+
+  const me = await API.get('/api/auth/me');
+  const p = me.profile || {};
+  const isDonor = role === 'donor';
+  const bloodValue = isDonor ? p.blood_type : p.blood_type_needed;
+  const idLabel = isDonor ? 'Donor ID' : 'Patient ID';
+  const idValue = isDonor ? p.donor_code : p.patient_code;
+
+  page.innerHTML = `
+    <div class="grid cols-2">
+      <div class="card">
+        <h2>Profile Information</h2>
+        <div style="text-align:center;margin-bottom:14px">${UI.bloodChip(bloodValue, true)}</div>
+        <div class="table-wrap"><table>
+          <tr><th class="muted">${idLabel}</th><td>${UI.esc(idValue)}</td></tr>
+          <tr><th class="muted">Name</th><td>${UI.esc(p.first_name)} ${UI.esc(p.middle_name || '')} ${UI.esc(p.last_name)}</td></tr>
+          <tr><th class="muted">Age</th><td>${UI.esc(p.age)}</td></tr>
+          <tr><th class="muted">Sex</th><td>${UI.esc(p.sex)}</td></tr>
+          <tr><th class="muted">Contact</th><td>${UI.esc(p.contact_number)}</td></tr>
+          <tr><th class="muted">Email</th><td>${UI.esc(p.email || '-')}</td></tr>
+          <tr><th class="muted">Address</th><td>${UI.esc(p.address)}</td></tr>
+          ${isDonor
+            ? `<tr><th class="muted">Registered</th><td>${UI.fmtDate(p.date_registered)}</td></tr>`
+            : `<tr><th class="muted">Hospital</th><td>${UI.esc(p.hospital)}</td></tr>
+               <tr><th class="muted">Medical Notes</th><td>${UI.esc(p.medical_notes || '-')}</td></tr>`}
+        </table></div>
+      </div>
+      <div>
+        <div class="card">
+          <h2>Update Allowed Fields</h2>
+          <form id="prof-form">
+            <div class="field" style="margin-bottom:10px"><label>Contact Number *</label>
+              <input name="contact_number" required value="${UI.esc(p.contact_number)}"></div>
+            <div class="field" style="margin-bottom:10px"><label>Address *</label>
+              <input name="address" required value="${UI.esc(p.address)}"></div>
+            ${isDonor ? '' : `<div class="field" style="margin-bottom:10px"><label>Hospital *</label>
+              <input name="hospital" required value="${UI.esc(p.hospital)}"></div>`}
+            <button class="btn">Save Profile</button>
+          </form>
+        </div>
+        <div class="card" style="margin-top:14px">
+          <h2>Change Password</h2>
+          <form id="pw-form">
+            <div class="field" style="margin-bottom:10px"><label>Current Password *</label>
+              <input name="current" type="password" required></div>
+            <div class="field" style="margin-bottom:10px"><label>New Password *</label>
+              <input name="next" type="password" required placeholder="8+ chars, Aa + number"></div>
+            <button class="btn ghost">Change Password</button>
+          </form>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('prof-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const data = await API.put('/api/auth/profile', UI.formValues(e.target));
+      UI.okToast(data.message);
+    } catch (err) { UI.errToast(err.message); }
+  });
+  document.getElementById('pw-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const data = await API.put('/api/auth/password', UI.formValues(e.target));
+      UI.okToast(data.message);
+      e.target.reset();
+    } catch (err) { UI.errToast(err.message); }
+  });
+})();
+</script>
+<div id="toasts"></div>
+</body>
+</html>
